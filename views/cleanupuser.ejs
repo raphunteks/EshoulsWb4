@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title><%= title || 'Admin – Cleanup Discord Profiles' %></title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="color-scheme" content="dark" />
+  <link rel="icon" type="image/png" href="/img/ExLogo2.png" />
+  <link rel="stylesheet" href="/css/mainv2.css" />
+</head>
+<body class="page-dark admin-page admin-page--cleanup">
+  <div class="container">
+    <div class="admin-dashboard cleanup-admin-page">
+      <div class="key-admin-shell admin-key-shell">
+        <header class="key-admin-header admin-key-header">
+          <div class="key-admin-header-main admin-key-header-main">
+            <div class="key-admin-header-topline">
+              <h1 class="key-admin-title admin-key-title">
+                Admin – Cleanup Discord Profiles (Upstash)
+              </h1>
+
+              <% if (typeof isAdmin !== 'undefined' && isAdmin) { %>
+                <span class="badge badge-admin-session">
+                  <span class="badge-dot"></span>
+                  Admin session
+                </span>
+              <% } %>
+            </div>
+
+            <p class="key-admin-subtitle admin-key-subtitle">
+              Halaman ini menampilkan data
+              <code>exhub:discord:userprofile:&lt;discordId&gt;</code>
+              yang dibaca langsung dari Upstash oleh helper di
+              <code>server.js</code>
+              (<code>loadDiscordProfilesForCleanup()</code>).
+              Gunakan filter pencarian dan bulk action di bawah untuk
+              membersihkan profile Discord yang tidak terpakai.
+            </p>
+            <p class="key-admin-subtitle admin-key-subtitle">
+              Saat Anda menekan
+              <strong>Delete Selected Profiles</strong>,
+              server akan memanggil route
+              <code>POST /admin/cleanup/delete</code> di
+              <code>server.js</code>,
+              menghapus key-key tersebut dari Upstash dan mengupdate index
+              <code>exhub:discord:userindex</code>
+              dengan <code>SREM</code>.
+            </p>
+          </div>
+
+          <div class="key-admin-header-actions admin-key-header-actions">
+            <a href="/admin" class="key-btn key-btn-xs key-btn-outline">
+              ← Back to Admin Dashboard
+            </a>
+            <a href="/admin/discord" class="key-btn key-btn-xs key-btn-ghost">
+              Discord User Manager
+            </a>
+          </div>
+        </header>
+
+        <% if (msg || deletedCount || indexUpdated) { %>
+          <div class="alert alert-info" style="margin-top:10px;">
+            <div class="table-main-text">
+              <% if (deletedCount) { %>
+                Deleted profile keys:
+                <strong><%= deletedCount %></strong>.
+              <% } %>
+              <% if (indexUpdated) { %>
+                &nbsp;Updated userindex:
+                <strong><%= indexUpdated %></strong> id(s) removed.
+              <% } %>
+            </div>
+            <% if (msg) { %>
+              <div class="table-sub-text">
+                Message:
+                <strong><%= msg %></strong>
+              </div>
+            <% } %>
+          </div>
+        <% } %>
+
+        <div class="key-admin-metrics admin-key-metrics">
+          <div class="key-admin-metric-card">
+            <div class="key-admin-metric-label">Total Profiles (raw)</div>
+            <div class="key-admin-metric-value">
+              <%= typeof totalProfiles !== 'undefined' ? totalProfiles : 0 %>
+            </div>
+            <div class="key-admin-metric-sub">
+              Jumlah key dengan prefix
+              <code>exhub:discord:userprofile:</code>.
+            </div>
+          </div>
+
+          <div class="key-admin-metric-card">
+            <div class="key-admin-metric-label">Filtered Profiles</div>
+            <div class="key-admin-metric-value">
+              <%= typeof filteredCount !== 'undefined' ? filteredCount : 0 %>
+            </div>
+            <div class="key-admin-metric-sub">
+              Hasil setelah menerapkan query pencarian di bawah.
+            </div>
+          </div>
+
+          <div class="key-admin-metric-card">
+            <div class="key-admin-metric-label">User Index Count</div>
+            <div class="key-admin-metric-value">
+              <%= typeof indexCount !== 'undefined' ? indexCount : 0 %>
+            </div>
+            <div class="key-admin-metric-sub">
+              Panjang set <code>exhub:discord:userindex</code>.
+            </div>
+          </div>
+
+          <div class="key-admin-metric-card">
+            <div class="key-admin-metric-label">Orphan Profiles</div>
+            <div class="key-admin-metric-value">
+              <%= typeof orphanCount !== 'undefined' ? orphanCount : 0 %>
+            </div>
+            <div class="key-admin-metric-sub">
+              Profile dengan <code>inIndex === false</code>
+              (jika server mengisi flag ini).
+            </div>
+          </div>
+
+          <% if (typeof scanDurationMs !== 'undefined' || typeof scannedAtLabel !== 'undefined') { %>
+            <div class="key-admin-metric-card">
+              <div class="key-admin-metric-label">Scan Info</div>
+              <div class="key-admin-metric-value">
+                <%= typeof scanDurationMs !== 'undefined' ? (scanDurationMs + ' ms') : '-' %>
+              </div>
+              <div class="key-admin-metric-sub">
+                Last scan:
+                <%= typeof scannedAtLabel !== 'undefined' ? scannedAtLabel : '-' %>
+              </div>
+            </div>
+          <% } %>
+        </div>
+
+        <form
+          action="/admin/cleanup"
+          method="GET"
+          class="key-admin-filters"
+          autocomplete="off"
+        >
+          <div class="key-admin-filters-group">
+            <span>Search</span>
+            <input
+              type="text"
+              name="q"
+              class="key-input"
+              placeholder="Cari Discord ID / username / global name / email..."
+              value="<%= q || '' %>"
+              autocomplete="off"
+            />
+          </div>
+
+          <!--
+            Filter tambahan (onlyOrphan / onlyNoEmail / onlyNoGuilds)
+            disiapkan agar tetap kompatibel bila serverv3/server.js
+            nanti menambahkan logika filter.
+            Untuk saat ini, server.js hanya memakai parameter `q`.
+          -->
+          <div class="key-admin-filters-group">
+            <span>Filter (optional)</span>
+            <label class="key-checkbox-inline">
+              <input
+                type="checkbox"
+                name="onlyOrphan"
+                value="1"
+                <%= typeof onlyOrphan !== 'undefined' && onlyOrphan ? 'checked' : '' %>
+              />
+              <span>Only orphan (not in index)</span>
+            </label>
+            <label class="key-checkbox-inline">
+              <input
+                type="checkbox"
+                name="onlyNoEmail"
+                value="1"
+                <%= typeof onlyNoEmail !== 'undefined' && onlyNoEmail ? 'checked' : '' %>
+              />
+              <span>Only profiles without email</span>
+            </label>
+            <label class="key-checkbox-inline">
+              <input
+                type="checkbox"
+                name="onlyNoGuilds"
+                value="1"
+                <%= typeof onlyNoGuilds !== 'undefined' && onlyNoGuilds ? 'checked' : '' %>
+              />
+              <span>Only profiles with 0 guilds</span>
+            </label>
+          </div>
+
+          <div class="key-admin-filters-actions">
+            <button type="submit" class="key-btn key-btn-xs key-btn-outline">
+              Apply
+            </button>
+            <% if (q || onlyOrphan || onlyNoEmail || onlyNoGuilds) { %>
+              <a href="/admin/cleanup" class="key-btn key-btn-xs key-btn-ghost">
+                Reset
+              </a>
+            <% } %>
+          </div>
+        </form>
+      </div>
+
+      <main class="key-admin-main">
+        <section class="card admin-card-user-list">
+          <div class="card-header">
+            <div class="card-header-main">
+              <h2 class="section-title small">Discord Profiles (Upstash)</h2>
+              <p class="card-description">
+                Daftar profile Discord yang tersimpan di Upstash dengan prefix
+                <code>exhub:discord:userprofile:&lt;id&gt;</code>.
+                Centang baris yang ingin dihapus lalu klik
+                <strong>Delete Selected Profiles</strong>.
+              </p>
+              <p class="card-description">
+                Saat menghapus, server memproses request di
+                <code>POST /admin/cleanup/delete</code> dan:
+                menghapus key-key tersebut dari Upstash KV
+                (<code>kvDel</code>)
+                lalu membersihkan index
+                <code>exhub:discord:userindex</code>
+                dengan <code>SREM</code>.
+              </p>
+              <p class="card-description">
+                Showing
+                <strong><%= typeof filteredCount !== 'undefined' ? filteredCount : (profiles ? profiles.length : 0) %></strong>
+                of
+                <strong><%= typeof totalProfiles !== 'undefined' ? totalProfiles : (profiles ? profiles.length : 0) %></strong>
+                profiles.
+              </p>
+            </div>
+          </div>
+
+          <% if (!profiles || !profiles.length) { %>
+            <div class="empty-state">
+              <p>
+                Tidak ada profile yang ditemukan untuk prefix
+                <code>exhub:discord:userprofile:</code>.
+              </p>
+            </div>
+          <% } else { %>
+            <form
+              action="/admin/cleanup/delete"
+              method="POST"
+              class="cleanup-bulk-form"
+              autocomplete="off"
+              onsubmit="return confirm('Hapus semua profile yang dicentang dari Upstash? Tindakan tidak dapat dibatalkan. Lanjutkan?');"
+            >
+              <div
+                class="discord-bulk-actions"
+                style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;"
+              >
+                <div class="table-sub-text">
+                  Centang profile yang ingin dihapus permanen.
+                  Hanya key
+                  <code>exhub:discord:userprofile:&lt;id&gt;</code>
+                  yang akan dihapus.
+                  Index
+                  <code>exhub:discord:userindex</code> juga akan di-update
+                  agar Discord ID tersebut tidak muncul lagi.
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                  <span
+                    class="table-sub-text mono"
+                    id="cleanup-selected-count"
+                  >
+                    0 selected
+                  </span>
+                  <button
+                    type="button"
+                    class="key-btn key-btn-xs key-btn-ghost"
+                    id="select-orphan-only"
+                  >
+                    Select Orphan Only
+                  </button>
+                  <button
+                    type="button"
+                    class="key-btn key-btn-xs key-btn-ghost"
+                    id="clear-selection"
+                  >
+                    Clear Selection
+                  </button>
+                  <button
+                    type="submit"
+                    class="key-btn key-btn-xs key-btn-outline key-btn-danger-soft"
+                  >
+                    Delete Selected Profiles
+                  </button>
+                </div>
+              </div>
+
+              <div class="table-wrapper key-admin-table-wrapper">
+                <table
+                  class="table table-compact key-table-activity"
+                  id="cleanup-profiles-table"
+                >
+                  <thead>
+                    <tr>
+                      <th style="width:32px;text-align:center;">
+                        <input
+                          type="checkbox"
+                          id="select-all-profiles"
+                          aria-label="Select all profiles"
+                        />
+                      </th>
+                      <th>Discord User</th>
+                      <th>Email / Guilds</th>
+                      <th>Last Login</th>
+                      <th>Index Status</th>
+                      <th>KV Key</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <% profiles.forEach(function(p) { %>
+                      <tr
+                        class="cleanup-profile-row"
+                        data-discord-id="<%= p.discordId %>"
+                        data-in-index="<%= p.inIndex === true ? '1' : (p.inIndex === false ? '0' : '') %>"
+                      >
+                        <td style="text-align:center;vertical-align:middle;">
+                          <input
+                            type="checkbox"
+                            name="selectedKeys[]"
+                            value="<%= p.key %>"
+                            class="cleanup-select-checkbox"
+                            aria-label="Select profile <%= p.discordId %>"
+                          />
+                        </td>
+
+                        <td class="table-main-text">
+                          <div class="discord-user-meta">
+                            <div class="discord-user-name">
+                              <%= p.globalName || p.username || '(no name)' %>
+                            </div>
+                            <div class="table-sub-text mono">
+                              ID: <%= p.discordId || '(unknown)' %>
+                            </div>
+                            <% if (p.username) { %>
+                              <div class="table-sub-text mono">
+                                username: <%= p.username %>
+                              </div>
+                            <% } %>
+                            <% if (p.userTier) { %>
+                              <div class="table-sub-text">
+                                Tier:
+                                <strong><%= p.userTier %></strong>
+                              </div>
+                            <% } %>
+                          </div>
+                        </td>
+
+                        <td class="table-main-text">
+                          <div class="table-sub-text mono">
+                            Email:
+                            <%= p.email || '-' %>
+                          </div>
+                          <div class="table-sub-text">
+                            Guilds:
+                            <strong>
+                              <%= p.guildCount != null ? p.guildCount : '-' %>
+                            </strong>
+                          </div>
+                          <% if (typeof p.keysCount !== 'undefined') { %>
+                            <div class="table-sub-text">
+                              Linked keys:
+                              <strong><%= p.keysCount %></strong>
+                            </div>
+                          <% } %>
+                        </td>
+
+                        <td class="table-main-text">
+                          <% if (p.lastLoginAtIso) { %>
+                            <div class="mono"><%= p.lastLoginAtIso %></div>
+                            <% if (p.lastLoginAgo) { %>
+                              <div class="table-sub-text">
+                                <%= p.lastLoginAgo %> ago
+                              </div>
+                            <% } %>
+                          <% } else { %>
+                            <div>-</div>
+                          <% } %>
+                        </td>
+
+                        <td class="table-main-text">
+                          <% if (p.inIndex === true) { %>
+                            <span class="status-pill status-pill--active">
+                              <span class="status-pill-dot"></span>
+                              <span class="status-pill-text">In userindex</span>
+                            </span>
+                          <% } else if (p.inIndex === false) { %>
+                            <span class="status-pill status-pill--expired">
+                              <span class="status-pill-dot"></span>
+                              <span class="status-pill-text">Orphan</span>
+                            </span>
+                          <% } else { %>
+                            <span class="status-pill status-pill--pending">
+                              <span class="status-pill-dot"></span>
+                              <span class="status-pill-text">Unknown</span>
+                            </span>
+                          <% } %>
+                        </td>
+
+                        <td class="table-main-text">
+                          <div class="mono"><%= p.key %></div>
+                        </td>
+                      </tr>
+                    <% }); %>
+                  </tbody>
+                </table>
+              </div>
+            </form>
+          <% } %>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      function initCleanupBulkSelect() {
+        var form = document.querySelector(".cleanup-bulk-form");
+        if (!form) return;
+
+        var selectAll = document.getElementById("select-all-profiles");
+        var checkboxes = form.querySelectorAll(".cleanup-select-checkbox");
+        var selectedCountEl = document.getElementById("cleanup-selected-count");
+        var selectOrphanBtn = document.getElementById("select-orphan-only");
+        var clearSelectionBtn = document.getElementById("clear-selection");
+
+        function updateSelectedCount() {
+          if (!selectedCountEl) return;
+          var count = 0;
+          checkboxes.forEach(function (cb) {
+            if (cb.checked) count++;
+          });
+          selectedCountEl.textContent = count + " selected";
+        }
+
+        if (selectAll) {
+          selectAll.addEventListener("change", function () {
+            var checked = !!selectAll.checked;
+            checkboxes.forEach(function (cb) {
+              cb.checked = checked;
+            });
+            updateSelectedCount();
+          });
+        }
+
+        checkboxes.forEach(function (cb) {
+          cb.addEventListener("change", function () {
+            if (selectAll) {
+              var allChecked = true;
+              var anyChecked = false;
+              checkboxes.forEach(function (item) {
+                if (!item.checked) {
+                  allChecked = false;
+                } else {
+                  anyChecked = true;
+                }
+              });
+              selectAll.checked = allChecked && anyChecked;
+            }
+            updateSelectedCount();
+          });
+        });
+
+        if (selectOrphanBtn) {
+          selectOrphanBtn.addEventListener("click", function () {
+            var rows = document.querySelectorAll(".cleanup-profile-row");
+            rows.forEach(function (row) {
+              var inIndex = row.getAttribute("data-in-index");
+              var checkbox = row.querySelector(".cleanup-select-checkbox");
+              if (!checkbox) return;
+              if (inIndex === "0") {
+                checkbox.checked = true;
+              } else {
+                checkbox.checked = false;
+              }
+            });
+            if (selectAll) {
+              selectAll.checked = false;
+            }
+            updateSelectedCount();
+          });
+        }
+
+        if (clearSelectionBtn) {
+          clearSelectionBtn.addEventListener("click", function () {
+            checkboxes.forEach(function (cb) {
+              cb.checked = false;
+            });
+            if (selectAll) {
+              selectAll.checked = false;
+            }
+            updateSelectedCount();
+          });
+        }
+
+        updateSelectedCount();
+      }
+
+      document.addEventListener("DOMContentLoaded", function () {
+        initCleanupBulkSelect();
+      });
+    })();
+  </script>
+
+  <script src="/js/protect-devtools.js"></script>
+</body>
+</html>
