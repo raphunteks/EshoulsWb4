@@ -13,6 +13,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const PROCESS_START_TIME = Date.now();
 
+/**
+ * Read-only filesystem flag:
+ * - Di Vercel, env VERCEL biasanya ter-set => kita anggap read-only.
+ * - Bisa juga dipaksa via READONLY_FS=1
+ */
+const IS_READONLY_FS =
+  process.env.READONLY_FS === '1' || !!process.env.VERCEL;
+
 // ======================================================
 // Integrasi serverv3 (Discord bulk delete)
 // ======================================================
@@ -199,6 +207,7 @@ function safeScriptFileName(id) {
 }
 
 function ensureScriptsRawDir() {
+  if (IS_READONLY_FS) return;
   try {
     if (!fs.existsSync(SCRIPTS_RAW_DIR)) {
       fs.mkdirSync(SCRIPTS_RAW_DIR, { recursive: true });
@@ -209,6 +218,7 @@ function ensureScriptsRawDir() {
 }
 
 function ensureRawFilesDir() {
+  if (IS_READONLY_FS) return;
   try {
     if (!fs.existsSync(RAW_FILES_DIR)) {
       fs.mkdirSync(RAW_FILES_DIR, { recursive: true });
@@ -251,6 +261,10 @@ function loadJsonFile(filePath, fallback) {
 }
 
 function saveJsonFile(filePath, data) {
+  // Di environment read-only (Vercel), skip write ke disk
+  if (IS_READONLY_FS) {
+    return;
+  }
   try {
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
@@ -652,14 +666,16 @@ async function saveScriptBody(scriptId, body) {
     }
   }
 
-  // Local file
-  try {
-    ensureScriptsRawDir();
-    const fileName = safeScriptFileName(scriptId) + '.lua';
-    const localPath = path.join(SCRIPTS_RAW_DIR, fileName);
-    fs.writeFileSync(localPath, strBody, 'utf8');
-  } catch (err) {
-    console.error('Failed to save script body to local file:', err);
+  // Local file (skip kalau read-only)
+  if (!IS_READONLY_FS) {
+    try {
+      ensureScriptsRawDir();
+      const fileName = safeScriptFileName(scriptId) + '.lua';
+      const localPath = path.join(SCRIPTS_RAW_DIR, fileName);
+      fs.writeFileSync(localPath, strBody, 'utf8');
+    } catch (err) {
+      console.error('Failed to save script body to local file:', err);
+    }
   }
 }
 
@@ -677,16 +693,18 @@ async function removeScriptBody(scriptId) {
     }
   }
 
-  // Hapus file lokal
-  try {
-    ensureScriptsRawDir();
-    const fileName = safeScriptFileName(scriptId) + '.lua';
-    const localPath = path.join(SCRIPTS_RAW_DIR, fileName);
-    if (fs.existsSync(localPath)) {
-      fs.unlinkSync(localPath);
+  // Hapus file lokal (skip kalau read-only)
+  if (!IS_READONLY_FS) {
+    try {
+      ensureScriptsRawDir();
+      const fileName = safeScriptFileName(scriptId) + '.lua';
+      const localPath = path.join(SCRIPTS_RAW_DIR, fileName);
+      if (fs.existsSync(localPath)) {
+        fs.unlinkSync(localPath);
+      }
+    } catch (err) {
+      console.error('Failed to remove script body local file:', err);
     }
-  } catch (err) {
-    console.error('Failed to remove script body local file:', err);
   }
 }
 
@@ -739,13 +757,15 @@ async function saveRawBody(rawId, body) {
     }
   }
 
-  try {
-    ensureRawFilesDir();
-    const base = safeScriptFileName(rawId);
-    const filePath = path.join(RAW_FILES_DIR, base + '.lua');
-    fs.writeFileSync(filePath, strBody, 'utf8');
-  } catch (err) {
-    console.error('Failed to save raw body to local file:', err);
+  if (!IS_READONLY_FS) {
+    try {
+      ensureRawFilesDir();
+      const base = safeScriptFileName(rawId);
+      const filePath = path.join(RAW_FILES_DIR, base + '.lua');
+      fs.writeFileSync(filePath, strBody, 'utf8');
+    } catch (err) {
+      console.error('Failed to save raw body to local file:', err);
+    }
   }
 }
 
@@ -761,17 +781,19 @@ async function removeRawBody(rawId) {
     }
   }
 
-  try {
-    ensureRawFilesDir();
-    const base = safeScriptFileName(rawId);
-    ['.lua', '.txt', '.raw'].forEach((ext) => {
-      const filePath = path.join(RAW_FILES_DIR, base + ext);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    });
-  } catch (err) {
-    console.error('Failed to remove raw body local file:', err);
+  if (!IS_READONLY_FS) {
+    try {
+      ensureRawFilesDir();
+      const base = safeScriptFileName(rawId);
+      ['.lua', '.txt', '.raw'].forEach((ext) => {
+        const filePath = path.join(RAW_FILES_DIR, base + ext);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      });
+    } catch (err) {
+      console.error('Failed to remove raw body local file:', err);
+    }
   }
 }
 
