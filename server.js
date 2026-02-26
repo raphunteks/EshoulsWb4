@@ -46,10 +46,14 @@ const upload = multer({
 // Upstash / KV helpers
 // ======================================================
 
-const KV_URL = process.env.KV_REST_API_URL;
+// Rapikan KV_URL (hapus trailing slash)
+const KV_URL = process.env.KV_REST_API_URL
+  ? process.env.KV_REST_API_URL.replace(/\/+$/, '')
+  : '';
 const KV_TOKEN = process.env.KV_REST_API_TOKEN;
 const hasKV = !!(KV_URL && KV_TOKEN);
 
+// Request via URL path — dipakai untuk perintah kecil (GET, INCR, SADD, dll)
 async function kvRequest(pathPart) {
   if (!hasKV || typeof fetch === 'undefined') return null;
 
@@ -81,12 +85,47 @@ function kvPath(cmd, ...segments) {
   return `${cmd}/${encoded.join('/')}`;
 }
 
+// GET tetap via URL (value-nya kecil, aman)
 async function kvGet(key) {
   return kvRequest(kvPath('GET', key));
 }
+
+// SET diubah: pakai POST body JSON array ["SET", "key", "value"]
+// supaya value besar (script .lua / .txt) tidak masuk URL dan tidak kena 431.
 async function kvSet(key, value) {
-  return kvRequest(kvPath('SET', key, value));
+  if (!hasKV || typeof fetch === 'undefined') return null;
+
+  const k = String(key);
+  const v = typeof value === 'string' ? value : String(value);
+
+  try {
+    const res = await fetch(KV_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${KV_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(['SET', k, v])
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      console.error('KV SET error', res.status, text);
+      return null;
+    }
+
+    const data = await res.json().catch(() => null);
+    if (data && Object.prototype.hasOwnProperty.call(data, 'result')) {
+      return data.result;
+    }
+    return null;
+  } catch (err) {
+    console.error('KV SET request failed:', err);
+    return null;
+  }
 }
+
+// Perintah kecil lain tetap pakai path (value pendek)
 async function kvIncr(key) {
   return kvRequest(kvPath('INCR', key));
 }
